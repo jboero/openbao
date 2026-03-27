@@ -1,10 +1,10 @@
 # openbao-seal-tpm
 
-A TPM 2.0 auto-unseal seal wrapper for [OpenBao](https://openbao.org/) (and Vault-compatible forks). Seals the master key to the TPM's Storage Root Key (SRK), with optional PCR binding for measured boot enforcement.
+A TPM 2.0 auto-unseal seal wrapper for [OpenBao](https://openbao.org/) (and Vault-compatible forks). Seals the master key to the TPM's Storage Root Key (SRK), with optional PCR binding for measured boot enforcement. This works on _single node only. NOTE this PoC is entirely vibe coded and not compatible with the OpenBao terms so cannot be merged as-is._.
 
 No cloud KMS dependency -- pure local hardware trust for bare-metal and edge deployments.
 
-**By John Boero and Claude -- PoC, not for production use.**
+*By John Boero and Claude -- PoC, not for production use or merge into OpenBao.*
 
 ## How It Works
 
