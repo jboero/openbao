@@ -1,0 +1,125 @@
+---
+sidebar_label: TPM 2.0 Unseal
+description: |-
+  The TPM seal configures OpenBao to use a TPM 2.0 device as the auto-unseal
+  mechanism, sealing the master key to the hardware's Storage Root Key.
+---
+
+# `tpm` seal
+
+The TPM seal configures OpenBao to use a TPM 2.0 device as the auto-unseal
+mechanism. The master key is sealed to the TPM's Storage Root Key (SRK),
+optionally bound to Platform Configuration Register (PCR) values for measured
+boot enforcement.
+
+OpenBao's TPM support is activated by the presence of a `seal "tpm"` block in
+OpenBao's configuration file.
+
+**By John Boero and Claude — PoC, not for production use.**
+
+:::warning
+
+TPM auto-unseal is currently Linux-only and requires direct access to the TPM
+device (`/dev/tpmrm0` or `/dev/tpm0`). The sealed key is bound to the specific
+TPM chip and cannot be migrated to another machine.
+
+:::
+
+## Requirements
+
+- TPM 2.0 hardware (or firmware TPM)
+- Linux with the TPM resource manager device (`/dev/tpmrm0`) or direct device
+  (`/dev/tpm0`)
+- `tpm2-tss` libraries installed
+- The OpenBao user must have read/write access to the TPM device (typically via
+  the `tss` group)
+
+### Verifying TPM access
+
+```bash
+# Check TPM device exists
+$ ls -la /dev/tpmrm0
+
+# Grant access to the OpenBao user
+$ sudo usermod -aG tss openbao
+
+# Verify TPM is functional
+$ tpm2_getcap properties-fixed 2>/dev/null | head -5
+```
+
+## `tpm` example
+
+This example shows configuring TPM auto-unseal through the OpenBao
+configuration file:
+
+```hcl
+seal "tpm" {
+  tpm_path    = "/dev/tpmrm0"
+  key_label   = "openbao-prod"
+}
+```
+
+### With PCR binding (measured boot)
+
+```hcl
+seal "tpm" {
+  tpm_path    = "/dev/tpmrm0"
+  pcr_indexes = "0,2,7"
+  key_label   = "openbao-prod"
+}
+```
+
+When PCR binding is enabled, the TPM will refuse to unseal if any of the
+specified PCR values have changed since the key was sealed. This ensures the
+server only auto-unseals when booted into a known-good state.
+
+## `tpm` parameters
+
+These parameters apply to the `seal` stanza in the OpenBao configuration file:
+
+- `tpm_path` `(string: "/dev/tpmrm0")`: Path to the TPM device. Falls back to
+  `/dev/tpm0` if the primary path fails.
+
+- `pcr_indexes` `(string: "")`: Comma-separated PCR indexes to bind the seal to
+  (e.g., `"0,2,7"`). If empty, the seal is bound only to the SRK and will unseal
+  on any boot of this machine.
+
+- `key_label` `(string: "openbao-seal")`: Label stored with the sealed blob for
+  identification. Useful when distinguishing multiple sealed objects.
+
+## PCR index reference
+
+| PCR | Measures | Stability |
+|-----|----------|-----------|
+| 0   | UEFI firmware code | Changes on firmware update |
+| 1   | UEFI firmware config | Changes on BIOS config change |
+| 2   | Option ROMs, UEFI drivers | Changes on firmware/add-in card update |
+| 4   | MBR / bootloader code | Changes on bootloader update |
+| 5   | GPT / partition table | Changes on disk layout change |
+| 7   | Secure Boot policy | Changes on Secure Boot key enrollment |
+| 8   | Kernel command line (grub) | Changes on grub config |
+| 9   | initrd / kernel image (grub) | Changes on kernel update |
+
+**Recommendations:**
+- **Minimal:** `"7"` — only Secure Boot policy. Survives kernel and firmware updates.
+- **Moderate:** `"0,2,7"` — firmware and Secure Boot. Catches firmware tampering.
+- **Strict:** `"0,2,4,7,8,9"` — full boot chain. Any OS or firmware change requires reseal.
+
+## Key properties
+
+- **Hardware-bound:** The sealed key never leaves the TPM. It cannot be
+  extracted or migrated to another machine.
+- **SRK-based:** Uses the TCG reference RSA-2048 SRK template. The SRK is
+  deterministic — recreating it with the same template on the same TPM yields
+  the same key.
+- **No network:** Everything is local. No KMS API calls, no cloud credentials,
+  no network dependency at boot.
+
+## After kernel or firmware updates
+
+If PCR binding is enabled, a kernel or firmware update will change PCR values
+and unseal will fail. To recover:
+
+1. Unseal manually with existing recovery keys
+2. Trigger seal migration so OpenBao re-seals with the current PCR values
+3. Verify auto-unseal works on the next restart
